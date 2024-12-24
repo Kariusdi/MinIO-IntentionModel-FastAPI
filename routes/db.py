@@ -1,7 +1,6 @@
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse, StreamingResponse
-from db.crud import list_files, list_delta_files, delete_latest_version, get_file
 import zipfile
 import io
 from db.minio_connection import MinioClient
@@ -10,18 +9,15 @@ from minio.error import S3Error
 from typing import Optional
 from io import BytesIO
 from dotenv import load_dotenv
-
-ACCESS_KEY = load_dotenv("ACCESS_KEY")
-SECRET_KEY = load_dotenv("SECRET_KEY")
-HOST = str(load_dotenv("DEV_HOST"))
-
+import os
+from db.crud import (
+    list_files, 
+    list_delta_files, 
+    delete_latest_version, 
+    get_file, 
+    upload_file
+)
 router = APIRouter()
-
-minio = MinioClient(host=HOST, 
-                    access_key=ACCESS_KEY, 
-                    secret_key=SECRET_KEY,
-                    secure_bool=False)
-client = minio.get_client()
 
 @router.get("/list")
 async def files_lister(bucket_name: str):
@@ -71,13 +67,19 @@ async def latest_delta_file_deleter(bucket_name: str, folder: str, file_name: st
     """
     API endpoint to delete specific file versions from a folder in a bucket.
     """
-    object_delta = f"{folder}/{file_name}/delta.bsdiff"
-    await delete_latest_version(bucket_name, object_delta)
-
-    return {"status": 200, "detial": "Delete Latest Delta File Successfully."}
+    try:
+        object_delta = f"{folder}/{file_name}/delta.bsdiff"
+        res = await delete_latest_version(bucket_name, object_delta)
+        if res:
+            return {
+                "status": 200, 
+                "detial": "Delete Latest Delta File Successfully."
+            }
+    except HTTPException as e:
+        raise e
 
 @router.post("/upload-zip")
-async def upload_files(file: UploadFile = File(...)):
+async def files_uploader(bucket_name: str, folder: str, file: UploadFile = File(...)):
     file_content = await file.read()
     success_files = []
     try:
@@ -85,26 +87,20 @@ async def upload_files(file: UploadFile = File(...)):
             for zip_file_name in zip_ref.namelist():
                 if zip_file_name.endswith('/') or zip_file_name.startswith('__MACOSX/'):
                     continue
-                try:
-                    with zip_ref.open(zip_file_name) as document:
+                with zip_ref.open(zip_file_name) as document:
+                    try:
                         document_content = document.read()
-                        object_name = "syllabus/" + zip_file_name
-                        client.put_object(
-                            bucket_name="cdti-policies",
+                        object_name = f"{folder}/{zip_file_name}"
+                        _ = await upload_file(
+                            bucket_name=bucket_name,
                             object_name=object_name,
-                            data=BytesIO(document_content),  # Wrap in BytesIO for streaming
+                            data=BytesIO(document_content),
                             length=len(document_content),
-                            content_type="application/octet-stream"  # Default content type
+                            content_type="application/octet-stream"
                         )
                         success_files.append(zip_file_name)
-                except S3Error as e:
-                    raise HTTPException(
-                        status_code=500,
-                        detail=f"Error uploading file: {str(e)}"
-                    )
-                except Exception as e:
-                    print(f"Error uploading {zip_file_name}: {str(e)}")
-                    raise HTTPException(status_code=500, detail=f"Error uploading {zip_file_name}: {str(e)}.")
+                    except HTTPException as e:
+                        raise e
         return {"status": 200, "message": f"ZIP file processed and {len(success_files)} files uploaded successfully!"}
     except zipfile.BadZipFile:
         raise HTTPException(status_code=400, detail="A file is not a valid ZIP file. Use ZIP file format only with this endpoint.")
@@ -113,31 +109,29 @@ async def upload_files(file: UploadFile = File(...)):
     
 
 @router.post("/upload")
-async def upload_file(file: UploadFile = File(...)):
+async def file_uploader(bucket_name: str, folder: str, file: UploadFile = File(...)):
     """
     API endpoint to upload a file to the MinIO bucket.
     """
-    try:
-        object_name = "syllabus/" + file.filename
-        client.put_object(
-            bucket_name="cdti-policies",
-            object_name=object_name,
-            data=file.file,
-            length=file.size,
-            content_type=file.content_type
-        )
-
-        return {
-            "status": 200, 
-            "message": f"File uploaded to {object_name} successfully!",
-        }
-    except S3Error as e:
+    if file.filename.endswith(('.pdf', '.docx')):
+        try:
+            object_name = f"{folder}/{file.filename}"
+            res = await upload_file(
+                bucket_name=bucket_name,
+                object_name=object_name,
+                data=file.file,
+                length=file.size,
+                content_type=file.content_type
+            )
+            if res:
+                return {
+                    "status": 200, 
+                    "message": f"File uploaded to {object_name} successfully!",
+                }
+        except HTTPException as e:
+            raise e
+    else:
         raise HTTPException(
-            status_code=500,
-            detail=f"Error uploading file: {str(e)}"
-        )
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Unexpected error: {str(e)}"
+            status_code=400,
+            detail=f".pdf or .docx types are only allowed. The '{file.filename}' is not allowed here!"
         )
