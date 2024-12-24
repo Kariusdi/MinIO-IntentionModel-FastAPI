@@ -1,5 +1,6 @@
 # Ignore Python cache directories
-__pycache__/
+db/__pycache__
+routes/__pycache__/
 
 # Ignore all .pyc files
 *.pyc
