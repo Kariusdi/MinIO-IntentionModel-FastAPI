@@ -1,7 +1,6 @@
 from fastapi import HTTPException
 from minio.error import S3Error
 from db.minio_connection import MinioClient
-from minio.deleteobjects import DeleteObject
 import asyncio
 from dotenv import load_dotenv
 import os
@@ -48,8 +47,7 @@ async def get_file(bucket_name, object_name, version_id=None):
         )
         return response
     except S3Error as exc:
-        print("Error retrieving object:", exc)
-        raise HTTPException(status_code=404, detail="File or version not found.")
+        raise HTTPException(status_code=404, detail=f"File or version not found. {exc}")
 
 async def delete_file(bucket_name, object_name, version_id=None):
     try:

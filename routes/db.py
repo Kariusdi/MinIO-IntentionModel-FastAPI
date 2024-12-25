@@ -1,15 +1,8 @@
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
-from fastapi.encoders import jsonable_encoder
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
 import zipfile
 import io
-from db.minio_connection import MinioClient
-import asyncio
-from minio.error import S3Error
-from typing import Optional
 from io import BytesIO
-from dotenv import load_dotenv
-import os
 from db.crud import (
     list_files, 
     list_delta_files, 
@@ -24,28 +17,38 @@ async def files_lister(bucket_name: str):
     """
     API endpoint to list all files in the bucket.
     """
-    files = await list_files(bucket_name)
-    return {"files": files, "total": len(files)}
-
+    try:
+        files = await list_files(bucket_name)
+        return {"status": 200, "details": files, "total": len(files)}
+    except HTTPException as e:
+        raise e
+        
 @router.get("/delta")
 async def delta_files_lister(bucket_name: str, folder: str, file_name: str):
     """
     API endpoint to list a files with a specific path in the bucket.
     """
-    files = await list_delta_files(bucket_name, folder, file_name)
-    return {"files": files, "total": len(files)}
+    try:
+        files = await list_delta_files(bucket_name, folder, file_name)
+        return {"status": 200, "details": files, "total": len(files)}
+    except HTTPException as e:
+        raise e
 
 @router.get("/get")
-async def file_getter(bucket_name: str, folder: str, file_name: str, version_id: str = None):
+async def file_getter(bucket_name: str, file_name: str, version_id: str = None):
     """
     API endpoint to retrieve specific file versions from a folder as a ZIP file.
     """
+    folder = "cdti-policies-md"
     baseline_key = f"{folder}/{file_name}/baseline.md"
     delta_key = f"{folder}/{file_name}/delta.bsdiff"
     
-    baseline_res = await get_file(bucket_name, baseline_key, version_id)
-    delta_res = await get_file(bucket_name, delta_key, version_id)
-
+    try:
+        baseline_res = await get_file(bucket_name, baseline_key, version_id)
+        delta_res = await get_file(bucket_name, delta_key, version_id)
+    except HTTPException as e:
+        raise e
+        
     baseline_content = baseline_res.read()
     delta_content = delta_res.read()
 
