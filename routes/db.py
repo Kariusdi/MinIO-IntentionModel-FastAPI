@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import StreamingResponse
 import zipfile
 import io
 from io import BytesIO
@@ -10,6 +10,10 @@ from db.crud import (
     get_file, 
     upload_file
 )
+from models.response import (
+    SuccessResponse,
+)
+
 router = APIRouter()
 
 @router.get("/list")
@@ -19,7 +23,7 @@ async def files_lister(bucket_name: str):
     """
     try:
         files = await list_files(bucket_name)
-        return {"status": 200, "details": files, "total": len(files)}
+        return SuccessResponse(details=files)
     except HTTPException as e:
         raise e
         
@@ -30,18 +34,18 @@ async def delta_files_lister(bucket_name: str, folder: str, file_name: str):
     """
     try:
         files = await list_delta_files(bucket_name, folder, file_name)
-        return {"status": 200, "details": files, "total": len(files)}
+        return SuccessResponse(details=files)
     except HTTPException as e:
         raise e
 
 @router.get("/get")
-async def file_getter(bucket_name: str, file_name: str, version_id: str = None):
+async def file_getter(folder_name: str, file_name: str, version_id: str = None):
     """
     API endpoint to retrieve specific file versions from a folder as a ZIP file.
     """
-    folder = "cdti-policies-md"
-    baseline_key = f"{folder}/{file_name}/baseline.md"
-    delta_key = f"{folder}/{file_name}/delta.bsdiff"
+    bucket_name = "cdti-policies-md"
+    baseline_key = f"{folder_name}/{file_name}/baseline.md"
+    delta_key = f"{folder_name}/{file_name}/delta.bsdiff"
     
     try:
         baseline_res = await get_file(bucket_name, baseline_key, version_id)
@@ -74,10 +78,7 @@ async def latest_delta_file_deleter(bucket_name: str, folder: str, file_name: st
         object_delta = f"{folder}/{file_name}/delta.bsdiff"
         res = await delete_latest_version(bucket_name, object_delta)
         if res:
-            return {
-                "status": 200, 
-                "detial": "Delete Latest Delta File Successfully."
-            }
+            return SuccessResponse(details=["Delete Latest Delta File Successfully."])
     except HTTPException as e:
         raise e
 
@@ -104,7 +105,7 @@ async def files_uploader(bucket_name: str, folder: str, file: UploadFile = File(
                         success_files.append(zip_file_name)
                     except HTTPException as e:
                         raise e
-        return {"status": 200, "message": f"ZIP file processed and {len(success_files)} files uploaded successfully!"}
+        return SuccessResponse(details=f"ZIP file processed and {len(success_files)} files uploaded successfully!")
     except zipfile.BadZipFile:
         raise HTTPException(status_code=400, detail="A file is not a valid ZIP file. Use ZIP file format only with this endpoint.")
     except Exception as e:
@@ -127,10 +128,7 @@ async def file_uploader(bucket_name: str, folder: str, file: UploadFile = File(.
                 content_type=file.content_type
             )
             if res:
-                return {
-                    "status": 200, 
-                    "message": f"File uploaded to {object_name} successfully!",
-                }
+                return SuccessResponse(details=f"File uploaded to {object_name} successfully!")
         except HTTPException as e:
             raise e
     else:

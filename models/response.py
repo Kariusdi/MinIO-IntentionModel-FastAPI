@@ -1,4 +1,9 @@
-def SuccessResponse(status_code: int = 200 ,data: int = 0):
+def SuccessResponse(status_code: int = 200 ,details = 0):
+    total = 0 if type(details) != "list" else len(details)
     return {"status": status_code, 
-            "details": data, 
-            "total": len(data)}
+            "details": details, 
+            "total": total}
+
+def ExceptionResponse(status_code: int = 500 ,data = 0):
+    return {"status": status_code, 
+            "details": data}
