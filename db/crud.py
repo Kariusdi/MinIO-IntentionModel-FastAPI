@@ -6,8 +6,8 @@ from dotenv import load_dotenv
 import os
 
 load_dotenv()
-ACCESS_KEY = os.getenv('ACCESS_KEY')
-SECRET_KEY = os.getenv('SECRET_KEY')
+ACCESS_KEY = os.getenv('MINIO_ACCESS_KEY')
+SECRET_KEY = os.getenv('MINIO_SECRET_KEY')
 HOST = os.getenv('DEV_HOST')
 
 minio = MinioClient(host=HOST, 
@@ -16,36 +16,53 @@ minio = MinioClient(host=HOST,
                     secure_bool=False)
 client = minio.get_client()
 
+def listfiles_helper(obj):
+    return {
+        "bucket_name": obj.bucket_name, 
+        "object_name": obj.object_name, 
+        "size": obj.size, 
+        "version_id": obj.version_id, 
+        "is_latest": obj.is_latest
+        }
+
 async def list_files(bucket_name):
     try:
         objects = await asyncio.to_thread(client.list_objects, bucket_name, recursive=True, include_version=True)
-        return [{"bucket_name": obj.bucket_name, 
-                 "object_name": obj.object_name, 
-                 "size": obj.size, 
-                 "version_id": obj.version_id, 
-                 "is_latest": obj.is_latest} for obj in objects]
+        return [listfiles_helper(obj) for obj in objects]
     except S3Error as exc:
         print("Error listing objects:", exc)
         raise HTTPException(status_code=500, detail="Could not list files in the bucket. It's empty.")
 
-async def list_delta_files(bucket_name, folder, file_path):
+async def list_delta_files(folder, file_path):
     try:
+        bucket_name = "cdti-policies-md"
         objects = await asyncio.to_thread(client.list_objects, bucket_name, prefix=f"{folder}/{file_path}/delta.bsdiff", include_version=True)
-        return [{"bucket_name": obj.bucket_name, 
-                 "object_name": obj.object_name, 
-                 "size": obj.size, 
-                 "version_id": obj.version_id, 
-                 "is_latest": obj.is_latest} for obj in objects]
+        if objects:
+            return [listfiles_helper(obj) for obj in objects]
+        else:
+            return False
     except S3Error as exc:
         print("Error listing objects:", exc)
         raise HTTPException(status_code=500, detail="Could not list files in the bucket. It's empty.")
 
-async def get_file(bucket_name, object_name, version_id=None):
+async def get_file(bucket_name, object_name, version=0):
     try:
+        versions = await list_file_versions(bucket_name, object_name)
+        if not versions:
+            raise HTTPException(status_code=404, detail="No versions found for the object.")
+
+        if version != None:
+            latest_version = versions[int(version)]
+            latest_version_id = latest_version.version_id
+        else:
+            latest_version_id = None
+        
         response = await asyncio.to_thread(
-            client.get_object, bucket_name, object_name, version_id=version_id
+            client.get_object, bucket_name, object_name, version_id=latest_version_id
         )
         return response
+    except IndexError:
+        raise HTTPException(status_code=500, detail=f"This version of the {object_name} doesn't exist.")
     except S3Error as exc:
         raise HTTPException(status_code=404, detail=f"File or version not found. {exc}")
 

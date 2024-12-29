@@ -10,46 +10,122 @@ from db.crud import (
     get_file, 
     upload_file
 )
+from utils.api_key_auth import (
+    get_api_key
+)
 from models.response import (
     SuccessResponse,
 )
+from utils.jwt_bearer import JWTBearer
 
 router = APIRouter()
 
-@router.get("/list")
+@router.get("/list", dependencies=[Depends(JWTBearer())])
 async def files_lister(bucket_name: str):
     """
-    API endpoint to list all files in the bucket.
+    ## <mark>API endpoint to list all files in the bucket (not a specific folder).
+    
+    #### **Request Parameters** 
+    | Parameter   | Type   | Description                | Required |
+    |-------------|--------|----------------------------|----------|
+    | `bucket`    | string | Name of the bucket         | Yes      |
+
+    #### **Response Example**
+    ```json
+    {
+        "status": 200,
+        "data": {
+            "folder": "None",
+            "file_name": "None",
+            "delta_files": [
+                {
+                     "bucket_name": "cdti-policies",
+                    "object_name": "guide/student_guide.pdf",
+                    "size": 3128851,
+                    "version_id": "0ddd9a14-2b43-4e70-a3e0-6e73962fcb32",
+                    "is_latest": "true"
+                }
+            ]
+        },
+        "total": 1
+    }
     """
     try:
         files = await list_files(bucket_name)
-        return SuccessResponse(details=files)
+        return SuccessResponse(data=files)
     except HTTPException as e:
         raise e
         
-@router.get("/delta")
-async def delta_files_lister(bucket_name: str, folder: str, file_name: str):
+@router.get("/delta", dependencies=[Depends(JWTBearer())])
+async def delta_files_lister(folder: str, file_name: str):
     """
-    API endpoint to list a files with a specific path in the bucket.
+    ## <mark>API endpoint to list delta files with a specific folder and filename in the `cdti-policies-md collection`. 
+    
+    #### **Request Parameters** 
+    | Parameter   | Type   | Description                                      | Required |
+    |-------------|--------|--------------------------------------------------|----------|
+    | `folder`    | string | Name of the folder within the bucket.            | Yes      |
+    | `file_name` | string | Name of the specific file to search for deltas.  | Yes      |
+
+    #### **Response Example**
+    ```json
+    {
+        "status": 200,
+        "data": {
+            "folder": "syllabus",
+            "file_name": "course.pdf",
+            "delta_files": [
+                {
+                    "bucket_name": "cdti-policies-md",
+                    "object_name": "syllabus/course.pdf/delta.bsdiff",
+                    "size": 142,
+                    "version_id": "b0e6df27-bc86-41be-a35b-f1d2f50864f1",
+                    "is_latest": "true"
+                }
+            ]
+        },
+        "total": 1
+    }
     """
     try:
-        files = await list_delta_files(bucket_name, folder, file_name)
-        return SuccessResponse(details=files)
+        files = await list_delta_files(folder, file_name)
+        if not files:
+            return SuccessResponse(data="There's no delta files in this file_name", folder=folder, file_name=file_name)
+        return SuccessResponse(data=files, folder=folder, file_name=file_name)
     except HTTPException as e:
         raise e
 
-@router.get("/get")
-async def file_getter(folder_name: str, file_name: str, version_id: str = None):
+@router.get("/raw", dependencies=[Depends(JWTBearer())])
+async def raw_file_getter(folder: str, file_name: str, version: str = "0"):
+    """
+    API endpoint to retrieve specific file versions from a folder as a ZIP file.
+    """
+    bucket_name = "cdti-policies"
+    object_key = f"{folder}/{file_name}"
+    
+    try:
+        file_content = await get_file(bucket_name, object_key, version)
+    except HTTPException as e:
+        raise e
+    
+    return StreamingResponse(
+        file_content,
+        media_type="application/octet-stream",  # Use the appropriate MIME type for your file
+        headers={"Content-Disposition": f"attachment; filename={file_name}"}
+    )
+
+@router.get("/transfromed", dependencies=[Depends(JWTBearer())])
+async def transformed_file_getter(folder: str, file_name: str, version: str = "0"):
     """
     API endpoint to retrieve specific file versions from a folder as a ZIP file.
     """
     bucket_name = "cdti-policies-md"
-    baseline_key = f"{folder_name}/{file_name}/baseline.md"
-    delta_key = f"{folder_name}/{file_name}/delta.bsdiff"
+    baseline_key = f"{folder}/{file_name}/baseline.md"
+    delta_key = f"{folder}/{file_name}/delta.bsdiff"
     
     try:
-        baseline_res = await get_file(bucket_name, baseline_key, version_id)
-        delta_res = await get_file(bucket_name, delta_key, version_id)
+        baseline_res = await get_file(bucket_name, baseline_key, version=None)
+        delta_res = await get_file(bucket_name, delta_key, version)
     except HTTPException as e:
         raise e
         
@@ -69,7 +145,7 @@ async def file_getter(folder_name: str, file_name: str, version_id: str = None):
         headers={"Content-Disposition": f"attachment; filename={file_name}.zip"}
     )
 
-@router.delete("/delta")
+@router.delete("/delta", dependencies=[Depends(JWTBearer())])
 async def latest_delta_file_deleter(bucket_name: str, folder: str, file_name: str):
     """
     API endpoint to delete specific file versions from a folder in a bucket.
@@ -78,11 +154,25 @@ async def latest_delta_file_deleter(bucket_name: str, folder: str, file_name: st
         object_delta = f"{folder}/{file_name}/delta.bsdiff"
         res = await delete_latest_version(bucket_name, object_delta)
         if res:
-            return SuccessResponse(details=["Delete Latest Delta File Successfully."])
+            return SuccessResponse(details="Delete Latest Delta File Successfully.")
     except HTTPException as e:
         raise e
 
-@router.post("/upload-zip")
+@router.delete("/raw", dependencies=[Depends(JWTBearer())])
+async def latest_delta_file_deleter(folder: str, file_name: str):
+    """
+    API endpoint to delete specific file versions from a folder in a bucket.
+    """
+    try:
+        bucket_name = "cdti-policies"
+        object_delta = f"{folder}/{file_name}"
+        res = await delete_latest_version(bucket_name, object_delta)
+        if res:
+            return SuccessResponse(data="Delete Latest Delta File Successfully.")
+    except HTTPException as e:
+        raise e
+
+@router.post("/upload-files", dependencies=[Depends(JWTBearer())])
 async def files_uploader(bucket_name: str, folder: str, file: UploadFile = File(...)):
     file_content = await file.read()
     success_files = []
@@ -112,7 +202,7 @@ async def files_uploader(bucket_name: str, folder: str, file: UploadFile = File(
         raise HTTPException(status_code=500, detail=f"Error processing ZIP file: {str(e)}")
     
 
-@router.post("/upload")
+@router.post("/upload", dependencies=[Depends(JWTBearer())])
 async def file_uploader(bucket_name: str, folder: str, file: UploadFile = File(...)):
     """
     API endpoint to upload a file to the MinIO bucket.
