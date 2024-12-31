@@ -9,7 +9,7 @@ from utils.check_user_existance import check_user
 virtual_db_users = []
 router = APIRouter()
 
-@router.post("/signup")
+# @router.post("/signup")
 def create_user(user: UserSignUpSchema = Body(...)):
     virtual_db_users.append(user) # replace with db call, making sure to hash the password first
     return signJWT(user.fullname)

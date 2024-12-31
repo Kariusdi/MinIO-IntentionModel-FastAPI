@@ -16,8 +16,8 @@ app.add_middleware(
 )
 
 app.include_router(DbRouter, tags=["MinIO Management (CRUD)"], prefix="/minio")
-app.include_router(JwtAuth, tags=["Authentication JWT"], prefix="/auth")
+app.include_router(JwtAuth, tags=["Authentication JWT"])
 
 @app.get("/", tags=["Root"])
 async def read_root():
-    return {"message": "Hello world!, This is MinIO REST API server"}
+    return {"message": "Hello world!, This is MinIO REST API server for CDTI-ChatBot!"}
